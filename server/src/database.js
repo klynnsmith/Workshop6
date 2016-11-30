@@ -1,5 +1,6 @@
 // Data goes here.
 var initialData = {
+  //section of Worskshop has been read 
   // The "user" collection. Contains all of the users in our Facebook system.
   "users": {
     // This user has id "1".
