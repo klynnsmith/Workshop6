@@ -1,10 +1,11 @@
 var bodyParser = require('body-parser');
-var database = require('./database');
+var database = require('./database.js');
 var readDocument = database.readDocument;
 var StatusUpdateSchema = require('./schemas/statusupdate.json');
 var validate = require('express-jsonschema').validate;
 var writeDocument = database.writeDocument;
 var addDocument = database.addDocument;
+var CommentSchema = require('./schemas/comment.json')
 
 
 // Imports the express Node module.
@@ -15,18 +16,10 @@ var app = express();
 // You run the server from `server`, so `../client/build` is `server/../client/build`.
 // '..' means "go up one directory", so this translates into `client/build`!
 app.use(express.static('../client/build'));
-
-// Support receiving text in HTTP request bodies
 app.use(bodyParser.text());
-// Support receiving JSON in HTTP request bodies
 app.use(bodyParser.json());
 
-// Starts the server on port 3000!
-app.listen(3000, function() {
-    console.log('Example app listening on port 3000!');
-});
 
-app.use(bodyParser.text());
 
 /**
  * Resolves a feed item. Internal to the server, since it's synchronous.
@@ -60,6 +53,7 @@ function getFeedData(user) {
     return feedData;
 }
 
+module.exports.getFeedData;
 /**
  * Get the user ID from a token. Returns -1 (an invalid ID)
  * if it fails.
@@ -307,6 +301,93 @@ app.post('/search', function(req, res) {
     }
 });
 
+
+function postComment(feedItemId, author, contents) {
+    // If we were implementing this for real on an actual server, we would check
+    // that the user ID is correct & matches the authenticated user. But since
+    // we're mocking it, we can be less strict.
+    // Get the current UNIX time.
+    var time = new Date().getTime();
+    var com = readDocument('feedItems', feedItemId);
+    // The new status update. The database will assign the ID for us.
+    com.comments.push({
+      "author": author,
+      "contents": contents,
+      "postDate": time,
+      "likeCounter": []
+    });
+    writeDocument('feedItems', com);
+    return getFeedItemSync(feedItemId);
+        // List of comments on the post
+    }
+
+
+app.post('/feeditem/:feeditemid/comment/',
+    validate({
+        body: CommentSchema
+    }),
+    function(req, res) {
+
+        var body = req.body;
+        var postId = req.params.feeditemid;
+        var fromUser = getUserIdFromToken(req.get('Authorization'));
+
+        if (fromUser === body.author) {
+            var newUpdate = postComment(postId, body.author, body.contents);
+
+            res.status(201);
+            res.set('Location','/feeditem/' + newUpdate._id);
+
+            res.send(newUpdate);
+        } else {
+
+            res.status(401).end();
+        }
+    });
+
+app.put('/feeditem/:feeditemid/comment/:commentid/likelist/:userid', function(req, res){
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+  var postId = parseInt(req.params.feeditemid, 10);
+  var commentId = parseInt(req.params.commentid, 10);
+  var userId = parseInt(req.params.userid, 10);
+  if(fromUser === userId){
+    var feedItem = readDocument('feedItems', postId);
+    if(feedItem.comments[commentId].likeCounter.indexOf(userId)=== -1){
+      feedItem.comments[commentId].likeCounter.push(userId);
+    }
+      writeDocument('feedItems', feedItem);
+      feedItem.comments[commentId].author = readDocument('users', feedItem.comments[commentId].author);
+
+    res.status(201);
+    res.send(feedItem.comments[commentId]);
+    }
+    else {
+      res.status(401).end();
+    }
+  }
+)
+
+app.delete('/feeditem/:feeditemid/comment/:commentid/likelist/:userid', function(req, res){
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+  var feedItemId = parseInt(req.params.feeditemid,10);
+  var commentId = parseInt(req.params.commentid, 10);
+  var userId = parseInt(req.params.userid, 10);
+
+  if(fromUser === userId){
+    var feedItem = readDocument('feedItems', feedItemId);
+    var index = feedItem.comments[commentId].likeCounter.indexOf(userId);
+    if(index !== -1){
+      feedItem.comments[commentId].likeCounter.splice(index,1);
+    }
+    writeDocument('feedItems', feedItem);
+    feedItem.comments[commentId].author = readDocument('users', feedItem.comments[commentId].author);
+    res.status(201);
+    res.send(feedItem.comments[commentId]);
+  }
+  else{
+    res.status(401).end();
+  }
+})
 /**
  * Translate JSON Schema Validation failures into error 400s.
  */
@@ -318,4 +399,8 @@ app.use(function(err, req, res, next) {
         // It's some other sort of error; pass it to next error middleware handler
         next(err);
     }
+});
+
+app.listen(3000, function() {
+    console.log('Example app listening on port 3000!');
 });
